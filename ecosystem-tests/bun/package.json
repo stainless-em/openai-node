@@ -12,5 +12,6 @@
     "fastest-levenshtein": "^1.0.16",
     "bun-types": "latest",
     "typescript": "5.0.4"
-  }
+  },
+  "trustedDependencies": ["openai"]
 }

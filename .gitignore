@@ -11,4 +11,5 @@ tmp
 .pack
 ecosystem-tests/deno/package.json
 ecosystem-tests/*/openai.tgz
-
+.pnp.*
+**/.yarn/*

@@ -1,5 +1,5 @@
 {
-  "name": "node-js",
+  "name": "node-js-pnpm",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "openai": "^4.40.1"
-  }
+    "openai": "git+http://127.0.0.1:56704/.git"
+  },
+  "packageManager": "pnpm@9.14.2"
 }

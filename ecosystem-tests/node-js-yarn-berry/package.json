@@ -1,5 +1,5 @@
 {
-  "name": "node-js",
+  "name": "node-js-yarn-berry",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -10,5 +10,6 @@
   "license": "ISC",
   "devDependencies": {
     "openai": "^4.40.1"
-  }
+  },
+  "packageManager": "yarn@4.5.2"
 }

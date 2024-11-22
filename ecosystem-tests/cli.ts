@@ -3,6 +3,8 @@ import execa from 'execa';
 import yargs from 'yargs';
 import assert from 'assert';
 import path from 'path';
+import sirv from 'sirv';
+import { createServer } from 'http';
 
 const TAR_NAME = 'openai.tgz';
 const PACK_FOLDER = '.pack';
@@ -32,6 +34,22 @@ const projectRunners = {
   },
   'node-js': async () => {
     await installPackage();
+    await run('node', ['test.js']);
+  },
+  'node-js-yarn-classic': async () => {
+    await installPackage('corepack', ['yarn', 'add']);
+    await run('node', ['test.js']);
+  },
+  'node-js-yarn-berry': async () => {
+    await installPackage('corepack', ['yarn', 'add']);
+    await run('corepack', ['yarn', 'node', 'test.js']);
+  },
+  'node-js-yarn-berry-esm': async () => {
+    await installPackage('corepack', ['yarn', 'add']);
+    await run('corepack', ['yarn', 'node', 'test.js']);
+  },
+  'node-js-pnpm': async () => {
+    await installPackage('corepack', ['pnpm', 'install']);
     await run('node', ['test.js']);
   },
   'nodenext-tsup': async () => {
@@ -80,16 +98,9 @@ const projectRunners = {
     }
   },
   bun: async () => {
-    if (state.fromNpm) {
-      await run('bun', ['install', '-D', state.fromNpm]);
-      return;
-    }
+    await installPackage('bun', ['install']);
 
-    const packFile = getPackFile();
-    await fs.copyFile(packFile, `./${TAR_NAME}`);
-    await run('bun', ['install', '-D', `./${TAR_NAME}`]);
-
-    await run('npm', ['run', 'tsc']);
+    await run('bun', ['run', 'tsc']);
 
     if (state.live) {
       await run('bun', ['test']);
@@ -136,6 +147,15 @@ function parseArgs() {
       fromNpm: {
         type: 'string',
         description: 'Test installing from a given NPM package instead of the local package',
+      },
+      git: {
+        type: 'boolean',
+        default: false,
+        description: 'Test installing from git instead of the built package',
+      },
+      gitUrl: {
+        type: 'string',
+        hidden: true,
       },
       live: {
         type: 'boolean',
@@ -215,6 +235,19 @@ async function main() {
 
   if (!args.skipPack) {
     await buildPackage();
+    if (args.git) {
+      const server = createServer(
+        sirv('.pack/git', {
+          dotfiles: true,
+        }),
+      );
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      server.unref();
+      const addr = server.address()!;
+      if (typeof addr !== 'string') {
+        state.gitUrl = `git+http://127.0.0.1:${addr.port}/.git`;
+      }
+    }
   }
 
   const positionalArgs = args._.filter(Boolean);
@@ -246,8 +279,7 @@ async function main() {
 
     try {
       // Clean up the .pack folder if this was the process that created it.
-      await fs.unlink(PACK_FILE);
-      await fs.rmdir(packFolderPath);
+      await fs.rm(packFolderPath, { recursive: true, force: true });
     } catch (err) {
       console.log('Failed to delete .pack folder', err);
     }
@@ -339,6 +371,8 @@ async function main() {
                 ...(args.verbose ? ['--verbose'] : []),
                 ...(args.deploy ? ['--deploy'] : []),
                 ...(args.fromNpm ? ['--from-npm'] : []),
+                ...(args.git ? ['--git'] : []),
+                ...(state.gitUrl ? ['--git-url=' + state.gitUrl] : []),
               ],
               { stdio: 'pipe', encoding: 'utf8', maxBuffer: 100 * 1024 * 1024 },
             );
@@ -448,6 +482,21 @@ async function buildPackage() {
     await fs.mkdir(PACK_FOLDER);
   }
 
+  if (state.git) {
+    const script = `
+      rm -rf .pack/git/
+      mkdir .pack/git/
+      git ls-tree "$(git write-tree)" . --name-only | xargs -I {} cp -r {} .pack/git/ &&
+      cd .pack/git/ &&
+      git init -b main &&
+      git add --all &&
+      git commit -m 'test build' &&
+      git update-server-info
+    `;
+    await run('sh', ['-c', script]);
+    return;
+  }
+
   // Run our build script to ensure all of our build artifacts are up to date.
   // This matters the most for deno as it directly relies on build artifacts
   // instead of the pack file
@@ -469,20 +518,25 @@ async function buildPackage() {
   console.error(`Successfully created tarball at ${PACK_FILE}`);
 }
 
-async function installPackage() {
-  if (state.fromNpm) {
-    await run('npm', ['install', '-D', state.fromNpm]);
-    return;
-  }
-
+async function installPackage(pm: string = 'npm', args: string[] = ['install']) {
   try {
     // Ensure that there is a clean node_modules folder.
     await run('rm', ['-rf', `./node_modules`]);
   } catch (err) {}
 
-  const packFile = getPackFile();
-  await fs.copyFile(packFile, `./${TAR_NAME}`);
-  return await run('npm', ['install', '-D', `./${TAR_NAME}`]);
+  if (state.fromNpm) {
+    return await run(pm, [...args, '-D', state.fromNpm]);
+  } else if (state.git) {
+    return await run(pm, [
+      ...args,
+      '-D',
+      (args[0] === 'yarn' ? 'openai@' : '') + process.env['OPENAI_ECOSYSTEM_GIT_URL']!,
+    ]);
+  } else {
+    const packFile = getPackFile();
+    await fs.copyFile(packFile, `./${TAR_NAME}`);
+    return await run(pm, [...args, '-D', `./${TAR_NAME}`]);
+  }
 }
 
 function getPackFile() {
